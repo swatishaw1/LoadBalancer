@@ -72,7 +72,7 @@ public class ServerPool {
 	public List<Server> getAvailableServers() {
 		return servers.stream()
 				.filter(Server::isHealthy)
-				.filter(server -> getCircuitBreaker(server).requestAllowed())
+				.filter(server -> getCircuitBreaker(server).isAvailable())
 				.toList();
 	}
 

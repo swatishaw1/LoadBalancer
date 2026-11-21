@@ -54,6 +54,10 @@ public class LoadBalancerService {
 			System.out.println("Server: " + server.getUrl() + " has been used...");
 			CircuitBreaker circuitBreaker = serverPool.getCircuitBreaker(server);
 
+			if(!circuitBreaker.requestAllowed()){
+				continue;
+			}
+
 			try {
 				String response = client.get().uri(server.getUrl() + path).retrieve().body(String.class);
 				circuitBreaker.recordSuccess();
