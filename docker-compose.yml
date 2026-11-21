@@ -1,0 +1,66 @@
+
+services:
+  # Light Task Servers
+  light-task-server-1:
+    build:
+      context: ./instances
+      dockerfile: Dockerfile
+      args:
+        PROJECT_DIR: Light_Task_Server
+        ARTIFACT_ID: instance-1
+    environment:
+      SERVER_PORT: 8080
+    expose:
+      - "8080"
+
+  light-task-server-2:
+    build:
+      context: ./instances
+      dockerfile: Dockerfile
+      args:
+        PROJECT_DIR: Light_Task_Server
+        ARTIFACT_ID: instance-1
+    environment:
+      SERVER_PORT: 8082
+    expose:
+      - "8082"
+
+  # Heavy Task Servers
+  heavy-task-server-1:
+    build:
+      context: ./instances
+      dockerfile: Dockerfile
+      args:
+        PROJECT_DIR: Heavy_Task_Server
+        ARTIFACT_ID: instance-2
+    environment:
+      SERVER_PORT: 8081
+    expose:
+      - "8081"
+
+  heavy-task-server-2:
+    build:
+      context: ./instances
+      dockerfile: Dockerfile
+      args:
+        PROJECT_DIR: Heavy_Task_Server
+        ARTIFACT_ID: instance-2
+    environment:
+      SERVER_PORT: 8083
+    expose:
+      - "8083"
+
+  load-balancer:
+    build:
+      context: ./java-load-balancer
+      dockerfile: Dockerfile
+    ports:
+      - "9090:9090"
+    environment:
+      LIGHT_SERVERS: "http://light-task-server-1:8080,http://light-task-server-2:8082"
+      HEAVY_SERVERS: "http://heavy-task-server-1:8081,http://heavy-task-server-2:8083"
+    depends_on:
+      - light-task-server-1
+      - light-task-server-2
+      - heavy-task-server-1
+      - heavy-task-server-2
