@@ -1,125 +1,217 @@
 # Java Load Balancer
 
-A small Spring Boot HTTP load balancer with two sample backend services. It forwards incoming `GET` requests to healthy backends using round-robin or weighted round-robin selection, and retries another backend when a request fails.
+A Spring Boot Layer 7 HTTP load balancer that routes incoming requests across backend servers. It currently supports Round Robin and Weighted Round Robin, backend health checks, retries, timeouts, and per-server circuit breakers.
 
-## Project layout
 
-| Path | Purpose | Default port |
-| --- | --- | ---: |
-| `java-load-balancer/` | Load balancer application | 9090 |
-| `instances/Light_Task_Server/` | Sample light-task backend | 8080 |
-| `instances/Heavy_Task_Server/` | Sample heavy-task backend | 8081 |
-| `instances/run-windows.bat` | Build and launch the backends on Windows | — |
-| `instances/run-linux.sh` | Build and launch the backends on Linux | — |
-| `docker-compose.yml` | Docker Compose setup for the load balancer and both backends | — |
+## How it works
 
-## Requirements
+Think of the load balancer as a traffic controller: clients send requests to one entry point, and it chooses a backend that can handle the request.
 
-- Java 21 or later to build and run the Spring Boot applications.
-- The included Maven Wrapper is used for local builds; a separate Maven installation is not required.
-- Docker Engine or Docker Desktop and the Docker Compose plugin are only needed for the container option.
+### Request flow
 
-The first Maven build may need an internet connection to download dependencies. Docker builds also download their base images.
+```mermaid
+flowchart LR
+    A[Client] --> B[Load Balancer :9090]
+    B --> C[Choose a backend
+RR or WRR]
+    C --> D{Healthy and breaker
+allows request?}
+    D -- Yes --> E[Forward HTTP request]
+    E --> F[Backend server]
+    F --> G[Return response to client]
+    D -- No / request fails --> H{Attempts left?}
+    H -- Yes --> C
+    H -- No --> I[Return failure]
+```
 
-## Run the full project locally
+- **One entry point:** Clients call the LB on port `9090`; they don't need to choose a backend themselves.
+- **Routing strategy:** Round Robin rotates through eligible servers. Weighted Round Robin gives servers more or less traffic according to their weight (Light: `3`, Heavy: `1`).
+- **Health filtering:** A scheduled check calls each backend's `/health` endpoint every 60 seconds. Unhealthy servers are excluded until a later check marks them healthy.
+- **Retries:** When a backend attempt fails, the LB can try another eligible server, up to the configured maximum attempts. Caller-side HTTP errors are treated separately from backend availability failures.
+- **Timeouts:** Connection attempts have a `1s` timeout and response reads have a `2s` timeout. A slow backend can time out and the LB may try another backend.
 
-Start the two backend services first, then start the load balancer. Each service can be run in a separate terminal from the repository root.
+### Circuit breaker: give failing servers a break
 
-### 1. Build and start the backends
+Each backend has its own circuit breaker. After **3 consecutive request failures**, it opens for **30 seconds**. This stops repeated calls to a backend that is likely struggling. After the cooldown, it allows one trial request to check recovery.
 
-On Windows, run:
+```mermaid
+stateDiagram-v2
+    [*] --> CLOSED
+    CLOSED --> OPEN: 3 consecutive failures
+    OPEN --> HALF_OPEN: 30s cooldown ends
+    HALF_OPEN --> CLOSED: Trial succeeds
+    HALF_OPEN --> OPEN: Trial fails
+```
+
+- **CLOSED:** Normal requests are allowed; failures are counted.
+- **OPEN:** Requests are blocked temporarily.
+- **HALF_OPEN:** One trial request is allowed. Success closes the breaker; failure opens it again for another cooldown.
+
+Health checks, circuit breakers, and routing work together: health status filters out known-unhealthy servers, the strategy picks a candidate, the breaker permits or blocks the attempt, and retry logic can move to another candidate when needed.
+
+## Backend instances
+
+
+| Instance | Port | Weight |
+| --- | ---: | ---: |
+| Light 1 | 8080 | 3 |
+| Light 2 | 8082 | 3 |
+| Heavy 1 | 8081 | 1 |
+| Heavy 2 | 8083 | 1 |
+
+
+The LB listens on port `9090`. Backend URLs are configured through `LIGHT_SERVERS` and `HEAVY_SERVERS`.
+
+
+## Project structure
+
+```text
+.
+├── java-load-balancer/                  # Load balancer Spring Boot application
+│   └── src/main/java/com/LB/
+│       ├── controller/                  # Receives client HTTP requests
+│       ├── service/                     # Request forwarding and health-check logic
+│       ├── model/                        # Backend server representation and state
+│       ├── circuitbreaker/               # Per-server circuit breaker states and logic
+│       ├── constants/                     # Shared constants and enums
+│       └── loadbalancer/
+│           ├── strategy/                 # Routing algorithms (RR, WRR, etc.)
+│           └── factory/                  # Creates/selects the configured strategy
+│   ├── src/main/resources/              # Spring configuration
+│   └── pom.xml                           # Dependencies and build settings
+├── instances/
+│   ├── Light_Task_Server/              # Light backend application
+│   ├── Heavy_Task_Server/              # Heavy backend application
+│   └── docker-compose.yml                # Backend-only Docker setup
+├── docker-compose.yml                    # Full stack Docker setup
+└── README.md
+```
+
+The local startup scripts described below are created by the user and are not committed to the repository.
+
+## Run
+
+### Docker — entire stack
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+Stop with `docker compose down`.
+
+### Local — Windows CMD
+
+**1. Create `instances\\run-windows.bat`**
+
+Open Notepad, paste the following, and save it as `run-windows.bat` inside the `instances` folder:
+
+```bat
+@echo off
+setlocal
+set "ROOT=%~dp0"
+
+echo Building Light_Task_Server...
+call "%ROOT%Light_Task_Server\mvnw.cmd" -f "%ROOT%Light_Task_Server\pom.xml" package -DskipTests
+if errorlevel 1 exit /b 1
+
+echo Building Heavy_Task_Server...
+call "%ROOT%Heavy_Task_Server\mvnw.cmd" -f "%ROOT%Heavy_Task_Server\pom.xml" package -DskipTests
+if errorlevel 1 exit /b 1
+
+echo Starting Light instances...
+start "Light 1" java -jar "%ROOT%Light_Task_Server\target\instance-1-0.0.1-SNAPSHOT.jar"
+start "Light 2" java -jar "%ROOT%Light_Task_Server\target\instance-1-0.0.1-SNAPSHOT.jar" --server.port=8082 --instance.name=Light_Task_Server_2
+
+echo Starting Heavy instances...
+start "Heavy 1" java -jar "%ROOT%Heavy_Task_Server\target\instance-2-0.0.1-SNAPSHOT.jar"
+start "Heavy 2" java -jar "%ROOT%Heavy_Task_Server\target\instance-2-0.0.1-SNAPSHOT.jar" --server.port=8083 --instance.name=Heavy_Task_Server_2
+
+echo Backend instances launched in separate windows.
+endlocal
+```
+
+**2. Run the script** from the repository root:
 
 ```bat
 instances\run-windows.bat
 ```
 
-This builds both backend projects and opens separate windows for the Light Task Server on port `8080`, a second Light Task Server on port `8082`, and the Heavy Task Server on port `8081`. Keep those windows open while using the load balancer.
+This builds both backend projects and launches four backend windows on ports `8080`, `8082`, `8081`, and `8083`.
 
-On Linux or macOS, run:
-
-```bash
-cd instances
-chmod +x run-linux.sh
-./run-linux.sh
-```
-
-This builds and starts the Light Task Server on port `8080` and Heavy Task Server on port `8081` in the background. Logs are written to `instances/light-instance.log` and `instances/heavy-instance.log`. The script prints their process IDs; stop them with `kill <PID>`.
-
-### 2. Start the load balancer
-
-In a new terminal from the repository root:
-
-**Windows:**
+**3. Start the load balancer** in a separate CMD window:
 
 ```bat
 cd java-load-balancer
 mvnw.cmd spring-boot:run
 ```
 
-**Linux or macOS:**
+### Local — Linux / macOS Terminal
+
+**1. Create `instances/run-linux.sh`**
+
+Create this file in the `instances` directory and paste:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+"$ROOT/Light_Task_Server/mvnw" -f "$ROOT/Light_Task_Server/pom.xml" package -DskipTests
+"$ROOT/Heavy_Task_Server/mvnw" -f "$ROOT/Heavy_Task_Server/pom.xml" package -DskipTests
+
+java -jar "$ROOT/Light_Task_Server/target/instance-1-0.0.1-SNAPSHOT.jar" > "$ROOT/light-1.log" 2>&1 & LIGHT1_PID=$!
+java -jar "$ROOT/Light_Task_Server/target/instance-1-0.0.1-SNAPSHOT.jar" --server.port=8082 --instance.name=Light_Task_Server_2 > "$ROOT/light-2.log" 2>&1 & LIGHT2_PID=$!
+java -jar "$ROOT/Heavy_Task_Server/target/instance-2-0.0.1-SNAPSHOT.jar" > "$ROOT/heavy-1.log" 2>&1 & HEAVY1_PID=$!
+java -jar "$ROOT/Heavy_Task_Server/target/instance-2-0.0.1-SNAPSHOT.jar" --server.port=8083 --instance.name=Heavy_Task_Server_2 > "$ROOT/heavy-2.log" 2>&1 & HEAVY2_PID=$!
+
+printf 'Started backend instances. Logs are in the instances directory.\n'
+printf 'Stop all instances with: kill %s %s %s %s\n' "$LIGHT1_PID" "$LIGHT2_PID" "$HEAVY1_PID" "$HEAVY2_PID"
+wait
+```
+
+**2. Run it** from the repository root:
+
+```bash
+chmod +x instances/run-linux.sh
+./instances/run-linux.sh
+```
+
+The script builds both backend projects, starts all four instances in the background, and writes separate log files in `instances/`. Stop the servers with the printed `kill` command.
+
+**3. Start the load balancer** in another terminal:
 
 ```bash
 cd java-load-balancer
 ./mvnw spring-boot:run
 ```
 
-The load balancer listens on `http://localhost:9090`. To build a runnable JAR instead, use `mvnw.cmd package` on Windows or `./mvnw package` on Linux/macOS, then run `java -jar target/java-load-balancer-0.0.1-SNAPSHOT.jar` from `java-load-balancer/`.
+The LB endpoint is `http://localhost:9090`.
 
-## Make requests
-
-The load balancer forwards the requested path to a backend. For example:
+## Test
 
 ```bash
 curl http://localhost:9090/hi
-curl http://localhost:9090/health
 ```
-
-`/hi` returns the name of the backend that handled the request. `/health` is forwarded to a backend; it is not a health endpoint for the load balancer itself. When running the backends as local processes, you can check them directly at `http://localhost:8080/health` and `http://localhost:8081/health`.
-
-The Light Task Server's `/hello` endpoint deliberately waits 100 seconds before responding. The load balancer's backend read timeout is 2 seconds, so `/hello` will time out and trigger a retry rather than return a normal response. The Heavy Task Server's `/hello` endpoint responds immediately.
-
-## Run everything with Docker Compose
-
-From the repository root, build and start the load balancer and both backends together:
-
-```bash
-docker compose up --build
-```
-
-The load balancer is available at `http://localhost:9090`. The backend containers communicate with it over the Compose network, so their ports are not published on the host. To start in the background, add `-d`. View logs with `docker compose logs -f` and stop the stack with `docker compose down`.
-
-The backend URLs can be overridden with `LIGHT_SERVER_URL` and `HEAVY_SERVER_URL` if you run the load balancer outside Compose.
+`/hi` reports which backend handled the request. The sample `/hello` endpoint can be used to test delay, timeout, and retry behavior.
 
 ## Configuration
 
-Load balancer defaults are in [`java-load-balancer/src/main/resources/application.properties`](java-load-balancer/src/main/resources/application.properties):
+Settings are in `java-load-balancer/src/main/resources/application.properties`.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `server.port` | `9090` | Port for the load balancer HTTP server. |
-| `load-balancer.algorithm` | `WEIGHTED_ROUND_ROBIN` | Backend selection strategy. Accepts `ROUND_ROBIN` or `WEIGHTED_ROUND_ROBIN`. |
-| `load-balancer.max-attempts` | `2` | Maximum backend attempts for one request; limited to the number of currently available backends. |
+| Setting | Default |
+| --- | --- |
+| LB port | `9090` |
+| Health-check interval | `60000 ms` |
+| Maximum backend attempts | `2` |
+| Connect timeout | `1000 ms` |
+| Read timeout | `2000 ms` |
 
-Override a setting at startup with a Spring Boot command-line option. For example:
+## Future scope
 
-```bash
-./mvnw spring-boot:run -Dspring-boot.run.arguments="--server.port=9091 --load-balancer.algorithm=ROUND_ROBIN"
-```
-
-The backend URL defaults are Light Task Server (`http://localhost:8080`, weight `3`) and Heavy Task Server (`http://localhost:8081`, weight `1`). Override them with `LIGHT_SERVER_URL` and `HEAVY_SERVER_URL`. With weighted round robin and both backends available, requests are distributed in a 3:1 pattern over time. The Windows script also starts a second light backend on port `8082`, but the load balancer does not include it in its configured backend list by default.
-
-## Behavior and limitations
-
-- The controller forwards requests as HTTP `GET` requests and returns the backend response as plain text. Request bodies, original HTTP methods, and request headers are not forwarded.
-- Backends are initially assumed healthy and health is refreshed every 30 minutes. A failed request also affects its circuit breaker.
-- Each backend circuit breaker opens after three recorded request failures and permits requests again after 30 seconds.
-- Backend connections time out after 1 second and reads time out after 2 seconds.
-- The sample services and the load balancer are configured for local development. Update the backend URLs and deployment configuration before using them in another environment.
-
-## Source map
-
-- `java-load-balancer/src/main/java/com/LB/controller/` — incoming request controller.
-- `java-load-balancer/src/main/java/com/LB/service/` — request forwarding and backend health checks.
-- `java-load-balancer/src/main/java/com/LB/loadbalancer/strategy/` — round-robin strategies.
-- `java-load-balancer/src/main/java/com/LB/circuitbreaker/` — per-backend failure circuit breaker.
-- `instances/Light_Task_Server/src/` and `instances/Heavy_Task_Server/src/` — sample backend implementations.
+- Collect server metrics: active requests, average response time, request rate, and success/failure counts.
+- Add Least Connections and Least Response Time strategies.
+- Implement a bounded FIFO queue with queue timeout and overload rejection.
+- Improve routing decisions and dashboard visibility using metrics.
+- Add tests for routing, retries, health checks, circuit-breaker transitions, and queue behavior.
