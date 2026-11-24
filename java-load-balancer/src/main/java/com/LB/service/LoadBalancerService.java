@@ -5,7 +5,6 @@ import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
@@ -14,6 +13,7 @@ import com.LB.circuitbreaker.CircuitBreaker;
 import com.LB.loadbalancer.factory.LoadBalancingStrategyFactory;
 import com.LB.loadbalancer.strategy.LoadBalancingStrategy;
 import com.LB.model.Server;
+import com.LB.model.ServerMetrics;
 
 @Service
 public class LoadBalancerService {
@@ -47,7 +47,7 @@ public class LoadBalancerService {
 
 		int maxAttempts = Math.min(MAX_ATTEMPTS, availableServers.size());
 
-		for (int attepts = 0; attepts < maxAttempts; attepts++) {
+		for (int attempts = 0; attempts < maxAttempts; attempts++){
 			Server server = strategy.selectServer(availableServers, attemptedServers);
 			attemptedServers.add(server.getUrl());
 
@@ -58,20 +58,41 @@ public class LoadBalancerService {
 				continue;
 			}
 
+			ServerMetrics metrics = server.getMetrics();
+
+			metrics.requestStarted();
+			long startTime = System.nanoTime();
+
 			try {
-				String response = client.get().uri(server.getUrl() + path).retrieve().body(String.class);
+				String response = client.get()
+						.uri(server.getUrl() + path)
+						.retrieve()
+						.body(String.class);
+
+				long responseTimeMs = (System.nanoTime() - startTime) / 1_000_000;
+
+				metrics.requestSucceeded(responseTimeMs);
 				circuitBreaker.recordSuccess();
+
 				return response;
+
 			} catch (Exception ex) {
-				// A 4xx answer means the server is alive and the caller sent a bad request.
-				// That is not a server failure: do not count it and do not retry elsewhere.
-				if (ex instanceof HttpClientErrorException clientError && isCallerFault(clientError)) {
+
+				long responseTimeMs = (System.nanoTime() - startTime) / 1_000_000;
+
+				if (ex instanceof HttpClientErrorException clientError
+						&& isCallerFault(clientError)) {
+
+					metrics.requestSucceeded(responseTimeMs);
 					circuitBreaker.recordSuccess();
 					throw clientError;
 				}
 
+				metrics.requestFailed(responseTimeMs);
+
 				System.err.println("Server: " + server.getUrl() + " has failed...");
 				System.err.println("Exp message: " + ex.getMessage());
+
 				circuitBreaker.recordFailure();
 			}
 		}

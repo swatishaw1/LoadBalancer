@@ -22,12 +22,33 @@ public class LoadBalancingStrategyFactory {
 		this.wrrStrategy = wrrStrategy;
 	}
 
+	//Via application.properties
 	public LoadBalancingStrategy getStrategy() {
 		LoadBalancingAlgorithm algo = LoadBalancingAlgorithm.valueOf(algorithm.toUpperCase());
 
 		return switch (algo) {
 			case ROUND_ROBIN -> rrStrategy;
 			case WEIGHTED_ROUND_ROBIN -> wrrStrategy;
+		};
+	}
+
+	// Returns the configured strategy
+	public LoadBalancingStrategy getStrategy() {
+		LoadBalancingAlgorithm algo =
+				LoadBalancingAlgorithm.valueOf(algorithm.toUpperCase());
+
+		return getStrategy(algo);
+	}
+
+	// Returns a strategy based on the requested algorithm
+	public LoadBalancingStrategy getStrategy(LoadBalancingAlgorithm algo) {
+
+		return switch (algo) {
+			case ROUND_ROBIN -> rrStrategy;
+			case WEIGHTED_ROUND_ROBIN -> wrrStrategy;
+
+			default -> throw new UnsupportedOperationException(
+					"Algorithm is not implemented yet: " + algo);
 		};
 	}
 

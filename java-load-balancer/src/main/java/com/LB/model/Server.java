@@ -5,6 +5,7 @@ public class Server {
 	private String url;
 	private volatile boolean healthy;
 	private int weight;
+	private final ServerMetrics metrics = new ServerMetrics();
 
 	public Server(String url, boolean healthy) {
 		this.url = url;
@@ -39,6 +40,10 @@ public class Server {
 
 	public String getUrl() {
 		return url;
+	}
+
+	public ServerMetrics getMetrics() {
+		return metrics;
 	}
 
 }

@@ -14,6 +14,11 @@ public class WeightedRoundRobinStrategy implements LoadBalancingStrategy {
 	private final AtomicInteger counter = new AtomicInteger();
 
 	@Override
+	public LoadBalancingAlgorithm getAlgorithm() {
+		return LoadBalancingAlgorithm.WEIGHTED_ROUND_ROBIN;
+	}
+
+	@Override
 	public Server selectServer(List<Server> servers, List<String> excludedServers) {
 		List<Server> weightedServers = new ArrayList<>();
 		
