@@ -22,15 +22,15 @@ public class LoadBalancingStrategyFactory {
 		this.wrrStrategy = wrrStrategy;
 	}
 
-	//Via application.properties
-	public LoadBalancingStrategy getStrategy() {
-		LoadBalancingAlgorithm algo = LoadBalancingAlgorithm.valueOf(algorithm.toUpperCase());
-
-		return switch (algo) {
-			case ROUND_ROBIN -> rrStrategy;
-			case WEIGHTED_ROUND_ROBIN -> wrrStrategy;
-		};
-	}
+//	//Via application.properties
+//	public LoadBalancingStrategy getStrategy() {
+//		LoadBalancingAlgorithm algo = LoadBalancingAlgorithm.valueOf(algorithm.toUpperCase());
+//
+//		return switch (algo) {
+//			case ROUND_ROBIN -> rrStrategy;
+//			case WEIGHTED_ROUND_ROBIN -> wrrStrategy;
+//		};
+//	}
 
 	// Returns the configured strategy
 	public LoadBalancingStrategy getStrategy() {
