@@ -27,26 +27,23 @@ public class LeastResponseTimeStrategy implements LoadBalancingStrategy {
             throw new RuntimeException("No server is available for load balancing...");
         }
 
-        // Find servers with no successful request history
-        List<Server> unmeasuredServers = availableServers.stream()
-                .filter(server -> server.getMetrics().getSuccessfulRequests() == 0)
+        // Snapshot response times to avoid inconsistent reads during concurrent requests
+        List<ServerLatency> latencySnapshot = availableServers.stream()
+                .map(server -> new ServerLatency(
+                        server,
+                        server.getMetrics().getAverageResponseTimeMs()))
                 .toList();
 
-        // Give unmeasured servers a chance to receive requests
-        if (!unmeasuredServers.isEmpty()) {
-            int index = ThreadLocalRandom.current().nextInt(unmeasuredServers.size());
-            return unmeasuredServers.get(index);
-        }
-
-        // Find the minimum average response time
-        long minResponseTime = availableServers.stream()
-                .mapToLong(server -> server.getMetrics().getAverageResponseTimeMs())
+        // Find the minimum response time from the snapshot
+        long minResponseTime = latencySnapshot.stream()
+                .mapToLong(ServerLatency::responseTime)
                 .min()
                 .orElseThrow();
 
-        // Collect servers with the minimum response time
-        List<Server> fastestServers = availableServers.stream()
-                .filter(server -> server.getMetrics().getAverageResponseTimeMs() == minResponseTime)
+        // Collect fastest servers using the same snapshot
+        List<Server> fastestServers = latencySnapshot.stream()
+                .filter(entry -> entry.responseTime() == minResponseTime)
+                .map(ServerLatency::server)
                 .toList();
 
         // Randomly break ties
@@ -54,4 +51,6 @@ public class LeastResponseTimeStrategy implements LoadBalancingStrategy {
 
         return fastestServers.get(index);
     }
+
+    private record ServerLatency(Server server, long responseTime) {}
 }

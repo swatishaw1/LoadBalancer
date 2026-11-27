@@ -48,7 +48,7 @@ public class ServerPool {
 		return List.of(urls.split(",")).stream()
 				.map(String::trim)
 				.filter(url -> !url.isBlank())
-				.map(url -> new Server(url, true, weight))
+				.map(url -> new Server(url, true, weight, weight*100))
 				.toList();
 	}
 
@@ -71,8 +71,8 @@ public class ServerPool {
 	// A server can take traffic only if it is healthy AND its breaker allows it.
 	public List<Server> getAvailableServers() {
 		return servers.stream()
-				.filter(Server::isHealthy)
 				.filter(server -> getCircuitBreaker(server).isAvailable())
+				.filter(Server::isHealthy)
 				.toList();
 	}
 

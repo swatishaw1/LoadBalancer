@@ -4,6 +4,7 @@ package com.LB.loadbalancer.strategy;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.LB.service.ServerPool;
 import org.springframework.stereotype.Component;
 
 import com.LB.constants.LoadBalancingAlgorithm;

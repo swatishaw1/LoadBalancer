@@ -29,32 +29,33 @@ public class CircuitBreaker {
 
 	public synchronized boolean requestAllowed() {
 
-		// CLOSED: allow normal traffic.
 		if (state == States.CLOSED) {
+			System.out.println("[CircuitBreaker] " + serverUrl + " CLOSED -> request allowed");
 			return true;
 		}
 
-		// OPEN: block traffic until cooldown expires.
 		if (state == States.OPEN) {
 			long currentOpenDuration = System.currentTimeMillis() - openedAt;
+
 			if (currentOpenDuration < openStateMillis) {
+				System.out.println("[CircuitBreaker] " + serverUrl + " OPEN -> request blocked");
 				return false;
 			}
 
-			// Cooldown expired. Move to HALF_OPEN.
 			state = States.HALF_OPEN;
 			halfOpenTrialInProgress = false;
-			System.out.println("Server: " + serverUrl + " state has been updated from OPEN to HALF_OPEN...");
+
+			System.out.println("[CircuitBreaker] " + serverUrl + " OPEN -> HALF_OPEN");
 		}
 
-		// HALF_OPEN: allow only one trial request.
 		if (state == States.HALF_OPEN) {
 			if (halfOpenTrialInProgress) {
+				System.out.println("[CircuitBreaker] " + serverUrl + " HALF_OPEN -> trial blocked");
 				return false;
 			}
-			halfOpenTrialInProgress = true;
 
-			System.out.println("Server: " + serverUrl + " is allowing a trial request...");
+			halfOpenTrialInProgress = true;
+			System.out.println("[CircuitBreaker] " + serverUrl + " HALF_OPEN -> trial allowed");
 			return true;
 		}
 

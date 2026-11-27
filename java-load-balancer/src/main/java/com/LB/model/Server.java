@@ -5,6 +5,7 @@ public class Server {
 	private String url;
 	private volatile boolean healthy;
 	private int weight;
+	private int capacity;
 	private final ServerMetrics metrics = new ServerMetrics();
 
 	public Server(String url, boolean healthy) {
@@ -13,9 +14,13 @@ public class Server {
 	}
 
 	public Server(String url, boolean healthy, int weight) {
-		this.url = url;
-		this.healthy = healthy;
+		this(url,healthy);
 		this.weight = weight;
+	}
+
+	public Server(String url, boolean healthy, int weight, int capacity) {
+		this(url,healthy,weight);
+		this.capacity = capacity;
 	}
 
 	public int getWeight() {
@@ -44,6 +49,22 @@ public class Server {
 
 	public ServerMetrics getMetrics() {
 		return metrics;
+	}
+
+	public int getCapacity() {
+		return capacity;
+	}
+
+	public void setCapacity(int capacity) {
+		this.capacity = capacity;
+	}
+
+	public double getUtilization() {
+		if (capacity <= 0) {
+			return 0.0;
+		}
+
+		return (double) metrics.getActiveRequests() / capacity;
 	}
 
 }

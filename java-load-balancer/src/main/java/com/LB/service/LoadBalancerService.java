@@ -80,9 +80,7 @@ public class LoadBalancerService {
 
 				long responseTimeMs = (System.nanoTime() - startTime) / 1_000_000;
 
-				if (ex instanceof HttpClientErrorException clientError
-						&& isCallerFault(clientError)) {
-
+				if (ex instanceof HttpClientErrorException clientError && isCallerFault(clientError)) {
 					metrics.requestSucceeded(responseTimeMs);
 					circuitBreaker.recordSuccess();
 					throw clientError;
